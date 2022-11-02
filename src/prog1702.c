@@ -180,7 +180,10 @@ int main(int argc, char *argv[]){
   byte *buf = NULL;
   int bufsize = MEMSIZE;
   int loops = LOOPS;
-  unsigned long t_start, t_elapsed;
+  unsigned long t_start_total, t_total;
+  unsigned long t_start_cycle, t_cycle;
+  unsigned long t_start_vdd, t_vdd;
+  double vdd_duty;
 
   initGPIO();
   
@@ -223,26 +226,23 @@ int main(int argc, char *argv[]){
     exit(1);
   }
 
-  t_start = micros();
-  for(a = 0; a < MEMSIZE; a++){
-    unsigned long t_start, t_elapsed;
-    unsigned long t_vddstart, t_vddontime;
-    double vdd_duty;
-    
-    d = buf[a];
+  t_start_total = micros();
 
-    t_start = micros();
-    t_vddontime = 0;
-    for(i = 0; i < loops; i++){
-      fprintf(stderr, "a[%02x]<=%02x %d/%d\r", a, d, i+1, loops);
+  for(i = 0; i < loops; i++){
+    for(a = 0; a < MEMSIZE; a++){
+      d = buf[a];
+      
+      t_start_cycle = micros();
       
       disableInterrupt();
-      
+      //**************************************************************
+      // Critical Region
+
       setAddress(~a); // set binary complement address
       setData(d);
       delay_usec(100);  // t_ACW(>=25us)
 
-      t_vddstart = micros();
+      t_start_vdd = micros();
       digitalWrite(VDD_VGG, ON);
       delay_usec(50);  // t_ACH(>=25us)
 
@@ -257,24 +257,29 @@ int main(int argc, char *argv[]){
       delay_usec(50);   // t_VD(>=10us, <=100us)
 
       digitalWrite(VDD_VGG, OFF);
-      t_vddontime += (micros() - t_vddstart);
+      t_vdd = micros() - t_start_vdd;
+
+      //**************************************************************
       enableInterrupt();
-      
-      delay_usec(20*1000); // (>=12ms), t_DH(>=10us), t_ATH(>=10us)
-    }
-    t_elapsed = micros() - t_start;
-    vdd_duty = (double) t_vddontime / t_elapsed * 100;
-    fprintf(stderr, "a[%02x]<=%02x (%dms (%dus*%d), DutyCycle(Vdd,Vgg)=%.1lf%%)\n",
-	    a, d,
-	    (int)(t_elapsed/1000), (int)(t_elapsed/loops), loops,
-	    vdd_duty
-	    );
-    if(vdd_duty > 20.0){
-      fprintf(stderr, "Duty Cycle(Vdd,Vgg) exeeded the limit(20%%)\n");
-      exit(1);
+
+      delay_usec(15*1000); // (>=12ms), t_DH(>=10us), t_ATH(>=10us)
+
+      t_total = micros() - t_start_total;
+      t_cycle = micros() - t_start_cycle;
+      vdd_duty = (double) t_vdd / t_cycle * 100;
+
+      fprintf(stderr, "\rLoop=%d/%d, %dsec, a[%02x]<=%02x, %.1lfms/byte, DutyCycle(Vdd,Vgg)=%.1lf%%",
+	      i+1, loops,
+	      (int)(t_total/1000/1000),
+	      a, d,
+	      (double)t_cycle/1000, vdd_duty
+	      );
+      /* Check Vdd,Vgg Duty Cycle */
+      if(vdd_duty > 20.0){
+	fprintf(stderr, "\nDuty Cycle(Vdd,Vgg) exceeded the limit(20%%)\n");
+	exit(1);
+      }
     }
   }
-  t_elapsed = micros() - t_start;
-  fprintf(stderr, "done.(Total: %dsec)\n",
-	  (int)(t_elapsed/1000/1000));
+  fprintf(stderr, "\ndone.\n");
 }
