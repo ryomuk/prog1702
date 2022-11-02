@@ -18,5 +18,5 @@ Intelの古いEPROM 1702A用のプログラマです．書き込み機能に特�
 - 256バイトのバイナリファイルをそのまま書き込みます．他のフォーマットには対応していません．
 ```
 cd src
-sodo ./prog1702 test.bin
+sodo ./prog1702 sample.bin
 ```
