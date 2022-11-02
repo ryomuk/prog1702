@@ -1,0 +1,280 @@
+/*
+ * prog1702.c
+ * A simple programmer for Intel 1702A EPROM using Raspberry Pi Zero
+ *
+ * Copyright (c) 2022 Ryo Mukai
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <wiringPi.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <time.h> // for clock_gettime()
+
+
+typedef unsigned char byte;
+#define bit(x) (1<<(x))
+
+#define BLOCK_SIZE (4 * 1024)
+#define PI0_PERI_BASE 0x20000000
+#define PERI_BASE PI0_PERI_BASE
+
+#define LOOPS 32
+#define MEMSIZE 0x100
+
+#define A0 14
+#define A1 15
+#define A2 18
+#define A3 23
+#define A4 24
+#define A5 25
+#define A6  8
+#define A7  7
+#define D0 10
+#define D1  9
+#define D2 11
+#define D3  5
+#define D4  6
+#define D5 13
+#define D6 19 
+#define D7 26  
+#define VDD_VGG 20
+#define PROGRAM 21
+
+#define ON  1
+#define OFF 0
+
+#define delay_usec(x) delayNanoseconds((x)*1000L)
+void delayNanoseconds(unsigned int howLong)
+{
+  struct timespec tNow, tEnd;
+
+  clock_gettime(CLOCK_MONOTONIC, &tNow);
+  tEnd.tv_sec = tNow.tv_sec;
+  tEnd.tv_nsec = tNow.tv_nsec + howLong;
+  if(tEnd.tv_nsec >= 1000000000L){
+    tEnd.tv_sec++;
+    tEnd.tv_nsec -= 1000000000L;
+  }
+  do{
+    clock_gettime(CLOCK_MONOTONIC, &tNow);
+  } while ( (tNow.tv_sec == tEnd.tv_sec) ?
+	    (tNow.tv_nsec < tEnd.tv_nsec)
+	    : (tNow.tv_sec < tEnd.tv_sec));
+}
+
+volatile unsigned int *g_irqen1;
+volatile unsigned int *g_irqen2;
+volatile unsigned int *g_irqen3;
+volatile unsigned int *g_irqdi1;
+volatile unsigned int *g_irqdi2;
+volatile unsigned int *g_irqdi3;
+unsigned int g_irq1, g_irq2, g_irq3;
+
+int initInterrupt(){
+  int mem_fd;
+  char *map;
+  if ((mem_fd = open("/dev/mem", O_RDWR|O_SYNC)) < 0){
+    return(-1);
+  }
+  map = (char*) mmap(NULL,
+		     BLOCK_SIZE,
+		     PROT_READ | PROT_WRITE,
+		     MAP_SHARED,
+		     mem_fd,
+		     PERI_BASE + 0xb000
+		     );
+  if (map == MAP_FAILED){
+    return(-1);
+  }
+  g_irqen1 = (volatile unsigned int *) (map + 0x210);
+  g_irqen2 = (volatile unsigned int *) (map + 0x214);
+  g_irqen3 = (volatile unsigned int *) (map + 0x218);
+  g_irqdi1 = (volatile unsigned int *) (map + 0x21c);
+  g_irqdi2 = (volatile unsigned int *) (map + 0x220);
+  g_irqdi3 = (volatile unsigned int *) (map + 0x224);
+  return(0);
+}
+
+void disableInterrupt(){
+  g_irq1 = *g_irqen1;
+  g_irq2 = *g_irqen2;
+  g_irq3 = *g_irqen3;
+
+  *g_irqdi1 = 0xffffffff;
+  *g_irqdi2 = 0xffffffff;
+  *g_irqdi3 = 0xffffffff;
+}
+
+void enableInterrupt()
+{
+  *g_irqen1 = g_irq1;
+  *g_irqen2 = g_irq2;
+  *g_irqen3 = g_irq3;
+}
+
+void initGPIO(){
+  // Initialize WiringPi
+  wiringPiSetupGpio();
+
+  pinMode(D0, OUTPUT);
+  pinMode(D1, OUTPUT);
+  pinMode(D2, OUTPUT);
+  pinMode(D3, OUTPUT);
+  pinMode(D4, OUTPUT);
+  pinMode(D5, OUTPUT);
+  pinMode(D6, OUTPUT);
+  pinMode(D7, OUTPUT);
+  pinMode(A0, OUTPUT);
+  pinMode(A1, OUTPUT);
+  pinMode(A2, OUTPUT);
+  pinMode(A3, OUTPUT);
+  pinMode(A4, OUTPUT);
+  pinMode(A5, OUTPUT);
+  pinMode(A6, OUTPUT);
+  pinMode(A7, OUTPUT);
+
+  pinMode(VDD_VGG, OUTPUT);
+  digitalWrite(VDD_VGG, OFF);
+
+  pinMode(PROGRAM, OUTPUT);
+  digitalWrite(PROGRAM, OFF);
+}
+
+void setAddress(unsigned int address){
+  address = ~address; // flip the bits for TBD62083
+  digitalWrite(A0, address & bit(0));
+  digitalWrite(A1, address & bit(1));
+  digitalWrite(A2, address & bit(2));
+  digitalWrite(A3, address & bit(3));
+  digitalWrite(A4, address & bit(4));
+  digitalWrite(A5, address & bit(5));
+  digitalWrite(A6, address & bit(6));
+  digitalWrite(A7, address & bit(7));
+}
+
+void setData(unsigned int data){
+  digitalWrite(D0, data & bit(0));
+  digitalWrite(D1, data & bit(1));
+  digitalWrite(D2, data & bit(2));
+  digitalWrite(D3, data & bit(3));
+  digitalWrite(D4, data & bit(4));
+  digitalWrite(D5, data & bit(5));
+  digitalWrite(D6, data & bit(6));
+  digitalWrite(D7, data & bit(7));
+}
+
+void usage(){
+  fprintf(stderr, "Usage: prog1702 [OPTION]... FILE\n");
+  fprintf(stderr, "  -l[oops] (default=%d)\n", LOOPS);
+  exit(1);
+}
+
+int main(int argc, char *argv[]){
+  int i;
+  unsigned int a, d;
+  FILE *fp = stdin;
+  char *filename = NULL;
+  byte *buf = NULL;
+  int bufsize = MEMSIZE;
+  int loops = LOOPS;
+  unsigned long t_start, t_elapsed;
+
+  initGPIO();
+  
+  for(int i = 1; i < argc; i++){
+    if(argv[i][0] == '-'){
+      /*  */ if(strcmp(argv[i], "-l") == 0 || strcmp(argv[i], "-loops") == 0){
+	i++;
+	if(i >= argc) usage();
+	loops = atoi(argv[i]);
+      } else {
+	usage();
+      }
+    } else {
+      if(filename == NULL){
+	filename = argv[i];
+      } else {
+	usage();
+      }
+    }
+  }
+
+  if( filename == NULL){
+    usage();  // input file should be given by command line
+    // fp = stdin;
+  } else {
+    if((fp = fopen(filename, "r")) == NULL){
+      fprintf(stderr, "%s: Cannot open file '%s'\n", argv[0], filename);
+      exit(1);
+    }
+  }
+  if((buf = (byte *)malloc(bufsize)) == NULL){
+    fprintf(stderr, "malloc() failed.\n");
+    exit(1);
+  }
+
+  fread(buf, sizeof(byte), bufsize, fp);
+  
+  if(initInterrupt() !=0){
+    fprintf(stderr, "initInterrupt() failed. Try sudo ./prog1702\n");
+    exit(1);
+  }
+
+  t_start = micros();
+  for(a = 0; a < MEMSIZE; a++){
+    unsigned long t_start, t_elapsed;
+    unsigned long t_vddstart, t_vddontime;
+    double vdd_duty;
+    
+    d = buf[a];
+
+    t_start = micros();
+    t_vddontime = 0;
+    for(i = 0; i < loops; i++){
+      fprintf(stderr, "a[%02x]<=%02x %d/%d\r", a, d, i+1, loops);
+      
+      disableInterrupt();
+      
+      setAddress(~a); // set binary complement address
+      setData(d);
+      delay_usec(100);  // t_ACW(>=25us)
+
+      t_vddstart = micros();
+      digitalWrite(VDD_VGG, ON);
+      delay_usec(50);  // t_ACH(>=25us)
+
+      setAddress(a);
+      delay_usec(20);  // t_ATW(>=10us)
+      delay_usec(150); // t_VW(>=100us from VDDandVGG ON)
+
+      digitalWrite(PROGRAM, ON);
+      delay_usec(2500); // t_PW(<=3ms)
+
+      digitalWrite(PROGRAM, OFF);
+      delay_usec(50);   // t_VD(>=10us, <=100us)
+
+      digitalWrite(VDD_VGG, OFF);
+      t_vddontime += (micros() - t_vddstart);
+      enableInterrupt();
+      
+      delay_usec(20*1000); // (>=12ms), t_DH(>=10us), t_ATH(>=10us)
+    }
+    t_elapsed = micros() - t_start;
+    vdd_duty = (double) t_vddontime / t_elapsed * 100;
+    fprintf(stderr, "a[%02x]<=%02x (%dms (%dus*%d), DutyCycle(Vdd,Vgg)=%.1lf%%)\n",
+	    a, d,
+	    (int)(t_elapsed/1000), (int)(t_elapsed/loops), loops,
+	    vdd_duty
+	    );
+    if(vdd_duty > 20.0){
+      fprintf(stderr, "Duty Cycle(Vdd,Vgg) exeeded the limit(20%%)\n");
+      exit(1);
+    }
+  }
+  t_elapsed = micros() - t_start;
+  fprintf(stderr, "done.(Total: %dsec)\n",
+	  (int)(t_elapsed/1000/1000));
+}
