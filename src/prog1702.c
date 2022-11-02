@@ -268,9 +268,9 @@ int main(int argc, char *argv[]){
       t_cycle = micros() - t_start_cycle;
       vdd_duty = (double) t_vdd / t_cycle * 100;
 
-      fprintf(stderr, "\rLoop=%d/%d, %dsec, a[%02x]<=%02x, %.1lfms/byte, DutyCycle(Vdd,Vgg)=%.1lf%%",
+      fprintf(stderr, "\rLoop=%d/%d, %.2lfsec, a[%02x]<=%02x, %.1lfms/byte, DutyCycle(Vdd,Vgg)=%.1lf%%",
 	      i+1, loops,
-	      (int)(t_total/1000/1000),
+	      (double)t_total/1000/1000,
 	      a, d,
 	      (double)t_cycle/1000, vdd_duty
 	      );
