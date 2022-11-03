@@ -13,13 +13,13 @@
 #include <sys/mman.h>
 #include <time.h> // for clock_gettime()
 
-
-typedef unsigned char byte;
-#define bit(x) (1<<(x))
-
+// for disable and enable interrupt
 #define BLOCK_SIZE (4 * 1024)
 #define PI0_PERI_BASE 0x20000000
 #define PERI_BASE PI0_PERI_BASE
+
+typedef unsigned char byte;
+#define bit(x) (1<<(x))
 
 #define LOOPS 32
 #define MEMSIZE 0x100
@@ -144,7 +144,13 @@ void initGPIO(){
 }
 
 void setAddress(unsigned int address){
-  address = ~address; // flip the bits for TBD62083
+  // Address levels are approximately -40 volts for a logic "0"
+  // and approximately zero volts for a logic "1".
+  // ("The Intel Memory Design Handbook, Aug. 1973", p.2-4)
+
+  // flip the bits for TBD62083("H" input Sink Driver down to -47V)
+  address = ~address; 
+
   digitalWrite(A0, address & bit(0));
   digitalWrite(A1, address & bit(1));
   digitalWrite(A2, address & bit(2));
@@ -156,6 +162,12 @@ void setAddress(unsigned int address){
 }
 
 void setData(unsigned int data){
+  // A data level of approximately zero volts will result in the location
+  // remaining unchanged, while a level of -47(\pm 1)V will program
+  // a logic "1" (high output in read mode).
+  // ("The Intel Memory Design Handbook, Aug. 1973", p.2-4)
+
+  // Driver is TBD62083("H" input Sink Driver down to -47V)
   digitalWrite(D0, data & bit(0));
   digitalWrite(D1, data & bit(1));
   digitalWrite(D2, data & bit(2));
@@ -226,8 +238,15 @@ int main(int argc, char *argv[]){
     exit(1);
   }
 
+  // For best results, the 1602A/1702A should be programmed
+  // by scanning through the addresses in binary sequence some
+  // 32 times. Each pass repeats the same series of programming
+  // pulses. The duty cycle for applied power must not exceed
+  // 20%. As result, each pass takes about 4 seconds, with the
+  // 32 passes taking just over 2 minutes.
+  // ("The Intel Memory Design Handbook, Aug. 1973", p.2-4)
+  
   t_start_total = micros();
-
   for(i = 0; i < loops; i++){
     for(a = 0; a < MEMSIZE; a++){
       d = buf[a];
@@ -237,7 +256,10 @@ int main(int argc, char *argv[]){
       disableInterrupt();
       //**************************************************************
       // Critical Region
-
+      //**************************************************************
+      // Disable interrupts so that this process does not stop
+      // while power(Vdd, Vgg) or program pulses are asserted.
+      
       setAddress(~a); // set binary complement address
       setData(d);
       delay_usec(100);  // t_ACW(>=25us)
