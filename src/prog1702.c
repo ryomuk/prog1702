@@ -186,11 +186,13 @@ void usage(){
 
 int main(int argc, char *argv[]){
   int i;
-  unsigned int a, d;
+  int address;
+  byte data;
   FILE *fp = stdin;
   char *filename = NULL;
   byte *buf = NULL;
   int bufsize = MEMSIZE;
+  int writesize;
   int loops = LOOPS;
   unsigned long t_start_total, t_total;
   unsigned long t_start_cycle, t_cycle;
@@ -231,7 +233,8 @@ int main(int argc, char *argv[]){
     exit(1);
   }
 
-  fread(buf, sizeof(byte), bufsize, fp);
+  writesize = fread(buf, sizeof(byte), bufsize, fp);
+  printf("File size = %d byte(s)\n", writesize);
   
   if(initInterrupt() !=0){
     fprintf(stderr, "initInterrupt() failed. Try sudo ./prog1702\n");
@@ -248,8 +251,8 @@ int main(int argc, char *argv[]){
   
   t_start_total = micros();
   for(i = 0; i < loops; i++){
-    for(a = 0; a < MEMSIZE; a++){
-      d = buf[a];
+    for(address = 0; address < writesize; address++){
+      data = buf[address];
       
       t_start_cycle = micros();
       
@@ -260,15 +263,15 @@ int main(int argc, char *argv[]){
       // Disable interrupts so that this process does not stop
       // while power(Vdd, Vgg) or program pulses are asserted.
       
-      setAddress(~a); // set binary complement address
-      setData(d);
+      setAddress(~address); // set binary complement address
+      setData(data);
       delay_usec(100);  // t_ACW(>=25us)
 
       t_start_vdd = micros();
       digitalWrite(VDD_VGG, ON);
       delay_usec(50);  // t_ACH(>=25us)
 
-      setAddress(a);
+      setAddress(address);
       delay_usec(20);  // t_ATW(>=10us)
       delay_usec(150); // t_VW(>=100us from VDDandVGG ON)
 
@@ -293,7 +296,7 @@ int main(int argc, char *argv[]){
       fprintf(stderr, "\rLoop=%d/%d, %.2lfsec, a[%02x]<=%02x, %.1lfms/byte, DutyCycle(Vdd,Vgg)=%.1lf%%",
 	      i+1, loops,
 	      (double)t_total/1000/1000,
-	      a, d,
+	      address, data,
 	      (double)t_cycle/1000, vdd_duty
 	      );
       /* Check Vdd,Vgg Duty Cycle */
