@@ -1,5 +1,4 @@
-TARGET	= prog1702 makesample
-OBJ	= prog1702.o makesample.o
+TARGET	= prog1702
 LFLAGS	= -lwiringPi
 
 #CFLAGS	= -Wall -g3

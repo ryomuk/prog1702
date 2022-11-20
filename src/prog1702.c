@@ -226,8 +226,8 @@ int main(int argc, char *argv[]){
       exit(1);
     }
   }
-  if((buf = (byte *)malloc(bufsize)) == NULL){
-    fprintf(stderr, "malloc() failed.\n");
+  if((buf = (byte *)calloc(bufsize, sizeof(byte))) == NULL){
+    fprintf(stderr, "calloc() failed.\n");
     exit(1);
   }
 
