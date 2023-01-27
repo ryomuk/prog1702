@@ -1,32 +1,57 @@
-00000       FIM R1415   00101110 2E
-00001                   00000000 00
-00010       SRC R1415   00101111 2F
-00011       RDR         11101010 EA
-00100 L1:   WMP         11100001 E1
-00101       JCN T1:L2   00011001 19 /* jump if TEST==1 */
-00110                   00001001 09
-00111       IAC         11110010 F2
-01000       IAC         11110010 F2
-01001 L2:   DAC         11111000 F8
-01010       XCH R4      10110100 B4
-01011       JMS:WAIT    01010000 50
-01100                   00010000 10
-01101       LD  R4      10100100 A4
-01110       JUN L1      01000000 40
-01111                   00000100 04
-10000 WAIT: RDR         11101010 EA /* wait 88.5ms*(port+1) (88.5ms...1.4s) */
-10001       XCH R3      10110011 B3
-10010 L4:   ISZ R0:L4   01110000 70
-10011                   00010010 12
-10100       ISZ R1:L4   01110001 71
-10101                   00010010 12
-10110       ISZ R2:L4   01110010 72
-10111                   00010010 12
-11000       ISZ R3:L4   01110011 73
-11001                   00010010 12
-11010       BBL 0       11000000 C0
-11011       NOP         00000000 00
-11100       NOP         00000000 00
-11101       NOP         00000000 00
-11110       NOP         00000000 00
-11111       NOP         00000000 00
+;;; This source can be assembled with the Macroassembler AS
+;;; (http://john.ccac.rwth-aachen.de:8000/as/)
+
+;;; the following commands make test.bin
+;;; asl test.asm
+;;; p2bin test.p
+	
+        cpu 4004                ; AS's command to specify CPU
+
+;;; Conditional jumps syntax for Macroassembler AS:
+;;; JCN T     jump if TEST = 0 - most positive voltage or +5V
+;;; JCN TN    jump if TEST = 1 - most negative voltage or -10V
+;;; JCN C     jump if carry = 1
+;;; JCN CN    jump if carry = 0
+;;; JCN Z     jump if accumulator = 0
+;;; JCN ZN    jump if accumulator != 0
+
+P7 reg RERF
+
+;;; ---------------------------------------------------------------------------
+;;; Program Start
+;;; ---------------------------------------------------------------------------
+
+        org 0000H               ; beginning of 1702 EPROM
+
+;;; ---------------------------------------------------------------------------
+;;; Reset Entry
+;;; ---------------------------------------------------------------------------
+reset:
+	FIM P7, 0
+	SRC P7
+	RDR
+L1:	WMP
+	JCN TN, L2		; jump if TEST == 1
+	IAC
+	IAC
+L2:	DAC
+	XCH R4
+	JMS WAIT
+	LD R4
+	JUN L1
+
+WAIT:	RDR			; wait 88.5ms*(port+1) (85ms...1.4s)
+	XCH R3
+L4:	ISZ R0, L4
+	ISZ R1, L4
+	ISZ R2, L4
+	ISZ R3, L4
+	BBL 0
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+
+	END
+	
